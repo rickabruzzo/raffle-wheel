@@ -85,3 +85,18 @@ export function rowsToEntrants(rows) {
   if (entrants.length === 0) throw new Error('No entrants found in the sheet.');
   return entrants;
 }
+
+const TAU = Math.PI * 2;
+
+export function sliceUnderPointer(rot, n) {
+  const seg = TAU / n;
+  const m = (((-rot) % TAU) + TAU) % TAU;
+  return Math.floor(m / seg) % n;
+}
+
+export function targetRotation(currentRot, winnerIndex, n, spins = 5) {
+  const seg = TAU / n;
+  const baseRot = -((winnerIndex * seg) + seg / 2);
+  const delta = (((baseRot - currentRot) % TAU) + TAU) % TAU;
+  return currentRot + TAU * spins + delta;
+}

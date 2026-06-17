@@ -79,3 +79,24 @@ test('rowsToEntrants skips fully blank rows', () => {
 test('rowsToEntrants throws when no name columns exist', () => {
   assert.throws(() => rowsToEntrants([['Color', 'Size'], ['red', 'L']]));
 });
+
+import { sliceUnderPointer, targetRotation } from '../lib.js';
+
+test('sliceUnderPointer returns slice 0 at rest', () => {
+  assert.equal(sliceUnderPointer(0, 6), 0);
+});
+
+test('targetRotation lands on the chosen winner for many sizes', () => {
+  for (const n of [1, 2, 3, 4, 8, 13, 40, 137]) {
+    for (let w = 0; w < n; w++) {
+      const target = targetRotation(0, w, n, 5);
+      assert.equal(sliceUnderPointer(target, n), w, `n=${n} w=${w}`);
+    }
+  }
+});
+
+test('targetRotation always spins forward past the requested turns', () => {
+  const n = 10;
+  const target = targetRotation(1.234, 3, n, 5);
+  assert.ok(target >= 1.234 + Math.PI * 2 * 5);
+});
