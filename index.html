@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Raffle wheel</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>Raffle wheel</h1>
+    <div class="topbar-right">
+      <span id="remaining" class="remaining"></span>
+      <button id="resetBtn" type="button">Reload from sheet</button>
+    </div>
+  </header>
+
+  <div id="message" class="message" hidden></div>
+
+  <div class="layout">
+    <main class="stage">
+      <div class="wheel-wrap">
+        <canvas id="wheel" width="600" height="600" aria-label="Raffle wheel"></canvas>
+        <div class="pointer" aria-hidden="true"></div>
+        <div class="hub" aria-hidden="true"></div>
+        <canvas id="confetti" class="confetti" aria-hidden="true"></canvas>
+      </div>
+      <button id="spinBtn" class="spin-btn" type="button">Spin the wheel</button>
+      <div id="winner" aria-live="polite"></div>
+      <div id="controls" class="controls" hidden>
+        <button id="removeBtn" type="button">Remove winner &amp; spin again</button>
+        <button id="keepBtn" type="button">Keep &amp; spin again</button>
+      </div>
+    </main>
+
+    <aside class="winners-panel">
+      <h2>Winners</h2>
+      <ol id="winnersList" class="winners-list"></ol>
+    </aside>
+  </div>
+
+  <details class="override">
+    <summary>Use a different sheet (this browser only)</summary>
+    <div class="override-row">
+      <input id="sheetOverride" type="url" placeholder="Paste a Google Sheet link" />
+      <button id="applyOverride" type="button">Use this sheet</button>
+      <button id="clearOverride" type="button">Clear</button>
+    </div>
+  </details>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
