@@ -10,6 +10,7 @@ let entrants = [];      // current wheel (after removals)
 let winners = [];       // [{first,last,company}]
 let rot = 0;            // current wheel rotation (radians)
 let spinning = false;
+let spinToken = 0;      // bumped whenever the entrant list changes, to cancel a stale spin
 let lastWinnerIndex = -1;
 
 function escapeHtml(s) {
@@ -44,6 +45,8 @@ async function loadEntrants() {
     }
     const rows = parseCSV(await res.text());
     allEntrants = rowsToEntrants(rows);
+    spinToken++;        // supersede any spin animation still in flight
+    spinning = false;
     entrants = allEntrants.slice();
     winners = [];
     lastWinnerIndex = -1;
@@ -110,6 +113,7 @@ function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
 function spin() {
   if (spinning || entrants.length === 0) return;
   spinning = true;
+  const myToken = ++spinToken;
   $('spinBtn').disabled = true;
   $('controls').hidden = true;
   hideWinner();
@@ -118,6 +122,7 @@ function spin() {
   const start = rot, dur = 4500;
   let t0 = null;
   function frame(ts) {
+    if (myToken !== spinToken) return;   // a reload/reset superseded this spin
     if (t0 === null) t0 = ts;
     const p = Math.min(1, (ts - t0) / dur);
     rot = start + (target - start) * easeOutCubic(p);
