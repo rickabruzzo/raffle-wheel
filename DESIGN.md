@@ -251,8 +251,10 @@ Presentation only; the v2 data pipeline and winner logic are unchanged.
   available square in JS (`sizeWheel`, re-run on `resize`).
 - **Big winner splash.** A fixed full-screen overlay: prize image (if uploaded),
   "WINNER", the name at `clamp(44px,12vw,150px)`, company, "wins <prize>", and
-  full-screen confetti. Actions: "They're here — done" (dismiss) and
-  "Not here — spin again" (remove the candidate + redraw).
+  full-screen confetti. Actions: "They're here — done" (confirm the winner →
+  purge the entrant list and end the raffle, keeping the winner on screen with a
+  "New raffle" reset to setup) and "Not here — spin again" (remove the candidate +
+  redraw). Spinning is impossible once the winner is confirmed.
 - **Sound.** Web Audio, no asset files: a ratchet tick on each slice-pass that
   slows with the wheel (throttled to ≥28 ms apart) and a four-note win chime.
   A "Sound: on/off" header toggle; the AudioContext is created/resumed on the

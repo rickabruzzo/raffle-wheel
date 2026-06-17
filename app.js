@@ -238,12 +238,32 @@ function showWinnerOverlay(p) {
   const pim = $('bigPrizeImg');
   if (prizeImageUrl) { pim.src = prizeImageUrl; pim.hidden = false; }
   else { pim.hidden = true; pim.removeAttribute('src'); }
+  $('hereBtn').hidden = false;
+  $('notHereBig').hidden = false;
+  $('newRaffleBtn').hidden = true;
   $('winnerOverlay').hidden = false;
   fireConfetti($('confettiBig'), window.innerWidth, window.innerHeight, 200);
 }
 function hideOverlay() { $('winnerOverlay').hidden = true; }
 
-function theyreHere() { hideOverlay(); }  // winner stands; operator can hit Raffle complete
+// Winner confirmed present → the raffle is over. Purge the entrant list now (GDPR)
+// and keep the winner shown as the final result; no more spinning.
+function theyreHere() {
+  purgeEntrants();
+  $('hereBtn').hidden = true;
+  $('notHereBig').hidden = true;
+  $('newRaffleBtn').hidden = false;
+}
+
+function newRaffle() {
+  hideOverlay();
+  $('bigName').textContent = '';
+  $('bigCompany').textContent = '';
+  $('bigPrize').textContent = '';
+  setSetupMsg('', false);
+  $('startBtn').disabled = true;
+  showSetup();
+}
 
 function notHere() {
   if (candidate < 0 || candidate >= entrants.length) { hideOverlay(); return; }
@@ -287,15 +307,21 @@ function fireConfetti(cv, W, H, count) {
 }
 
 // ---------- GDPR purge ----------
-function raffleComplete() {
-  if (entrants.length === 0 && candidate < 0) return;
-  const ok = window.confirm('Raffle complete? This permanently deletes the uploaded entrants and all their data from this browser.');
-  if (!ok) return;
+function purgeEntrants() {
   entrants = [];
   candidate = -1;
   rot = 0; spinToken++; spinning = false;
   $('odsFile').value = '';
   if (ctx) ctx.clearRect(0, 0, SIZE, SIZE);
+  renderRemaining();
+  updateSpinButton();
+}
+
+function raffleComplete() {
+  if (entrants.length === 0 && candidate < 0) return;
+  const ok = window.confirm('Raffle complete? This permanently deletes the uploaded entrants and all their data from this browser.');
+  if (!ok) return;
+  purgeEntrants();
   hideOverlay();
   setSetupMsg('Entrant data purged. Upload a new file to run another raffle.', false);
   $('startBtn').disabled = true;
@@ -336,6 +362,7 @@ function init() {
   $('startBtn').addEventListener('click', () => { if (entrants.length) showDraw(); });
   $('spinBtn').addEventListener('click', spin);
   $('hereBtn').addEventListener('click', theyreHere);
+  $('newRaffleBtn').addEventListener('click', newRaffle);
   $('notHereBig').addEventListener('click', notHere);
   $('setupBtn').addEventListener('click', showSetup);
   $('completeBtn').addEventListener('click', raffleComplete);
