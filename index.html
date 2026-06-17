@@ -14,56 +14,72 @@
       <input id="confName" class="conf-name" type="text" placeholder="Conference name" aria-label="Conference name" />
     </div>
     <div class="topbar-actions">
+      <span id="remaining" class="remaining" hidden></span>
+      <button id="muteBtn" type="button" aria-pressed="false">Sound: on</button>
       <button id="setupBtn" type="button" hidden>Setup</button>
       <button id="completeBtn" class="danger" type="button" hidden>Raffle complete</button>
     </div>
   </header>
 
-  <div id="message" class="message" hidden></div>
+  <div class="content">
+    <section id="setup" class="setup">
+      <h2>Set up the raffle</h2>
+      <label class="field">
+        <span>Prize title</span>
+        <input id="prizeTitle" type="text" placeholder="e.g. Sphero BOLT robot" />
+      </label>
+      <label class="field">
+        <span>Prize image — optional, transparent PNG</span>
+        <input id="prizeImg" type="file" accept="image/*" />
+      </label>
+      <label class="field">
+        <span>Entrants spreadsheet (.ods)</span>
+        <input id="odsFile" type="file" accept=".ods,application/vnd.oasis.opendocument.spreadsheet" />
+      </label>
+      <p class="hint">
+        The file needs columns for First name, Last name, Company, and Email. Email is
+        used only to drop duplicates and <code>@honeycomb.io</code> entries — it is never shown.
+      </p>
+      <div id="setupMsg" class="setup-msg" hidden></div>
+      <button id="startBtn" class="start-btn" type="button" disabled>Start raffle →</button>
+    </section>
 
-  <section id="setup" class="setup">
-    <h2>Set up the raffle</h2>
-    <label class="field">
-      <span>Prize title</span>
-      <input id="prizeTitle" type="text" placeholder="e.g. Sphero BOLT robot" />
-    </label>
-    <label class="field">
-      <span>Prize image — optional, transparent PNG</span>
-      <input id="prizeImg" type="file" accept="image/*" />
-    </label>
-    <label class="field">
-      <span>Entrants spreadsheet (.ods)</span>
-      <input id="odsFile" type="file" accept=".ods,application/vnd.oasis.opendocument.spreadsheet" />
-    </label>
-    <p class="hint">
-      The file needs columns for First name, Last name, Company, and Email. Email is
-      used only to drop duplicates and <code>@honeycomb.io</code> entries — it is never shown.
-    </p>
-  </section>
+    <main id="draw" class="draw" hidden>
+      <div id="prizePanel" class="prize" hidden>
+        <img id="prizeImgView" class="prize-img" alt="" hidden />
+        <div class="prize-text">
+          <div class="prize-label">Prize</div>
+          <div id="prizeTitleView" class="prize-title"></div>
+        </div>
+      </div>
 
-  <main id="draw" class="draw" hidden>
-    <div id="prizePanel" class="prize" hidden>
-      <img id="prizeImgView" class="prize-img" alt="" hidden />
-      <div class="prize-text">
-        <div class="prize-label">Prize</div>
-        <div id="prizeTitleView" class="prize-title"></div>
+      <div id="wheelArea" class="wheel-area">
+        <div id="wheelSquare" class="wheel-square">
+          <canvas id="wheel" width="600" height="600" aria-label="Raffle wheel"></canvas>
+          <div class="pointer" aria-hidden="true"></div>
+          <div class="hub" aria-hidden="true"></div>
+          <canvas id="confetti" class="confetti" aria-hidden="true"></canvas>
+        </div>
+      </div>
+
+      <button id="spinBtn" class="spin-btn" type="button">Spin the wheel</button>
+    </main>
+  </div>
+
+  <div id="winnerOverlay" class="overlay" hidden>
+    <canvas id="confettiBig" class="overlay-confetti" aria-hidden="true"></canvas>
+    <div class="overlay-content">
+      <img id="bigPrizeImg" class="big-prize-img" alt="" hidden />
+      <div class="overlay-label">Winner</div>
+      <div id="bigName" class="big-name"></div>
+      <div id="bigCompany" class="big-company"></div>
+      <div id="bigPrize" class="big-prize"></div>
+      <div class="overlay-actions">
+        <button id="hereBtn" class="spin-btn" type="button">They're here — done</button>
+        <button id="notHereBig" type="button">Not here — spin again</button>
       </div>
     </div>
-
-    <div class="wheel-wrap">
-      <canvas id="wheel" width="600" height="600" aria-label="Raffle wheel"></canvas>
-      <div class="pointer" aria-hidden="true"></div>
-      <div class="hub" aria-hidden="true"></div>
-      <canvas id="confetti" class="confetti" aria-hidden="true"></canvas>
-    </div>
-
-    <div id="remaining" class="remaining"></div>
-    <button id="spinBtn" class="spin-btn" type="button">Spin the wheel</button>
-    <div id="winner" aria-live="polite"></div>
-    <div id="controls" class="controls" hidden>
-      <button id="notHereBtn" type="button">Not here — remove &amp; spin again</button>
-    </div>
-  </main>
+  </div>
 
   <script src="vendor/xlsx.full.min.js"></script>
   <script type="module" src="app.js"></script>

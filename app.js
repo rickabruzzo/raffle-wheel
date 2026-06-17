@@ -1,5 +1,5 @@
 import { CONFIG } from './config.js';
-import { rowsToEntrants, excludeByDomain, dedupeByEmail, targetRotation } from './lib.js';
+import { rowsToEntrants, excludeByDomain, dedupeByEmail, targetRotation, sliceUnderPointer } from './lib.js';
 
 // XLSX is the global from vendor/xlsx.full.min.js (loaded as a classic script first).
 
@@ -10,21 +10,24 @@ const LS_PRIZE = 'rafflePrizeTitle';
 
 let canvas, ctx;
 let entrants = [];        // current wheel (PII held only in memory, never persisted)
-let candidate = -1;       // index in entrants of the person the wheel last landed on
+let candidate = -1;       // index in entrants the wheel last landed on
 let rot = 0, spinning = false, spinToken = 0;
 let prizeImageUrl = null; // object URL, in memory only
+
+// sound
+let audioCtx = null, muted = false;
+let lastSlice = -1, lastTickTime = 0;
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
-function truncate(s, max) { return s.length > max ? s.slice(0, max - 1) + '…' : s; }
 
-function showMessage(text, isError) {
-  const el = $('message');
+function setSetupMsg(text, isError) {
+  const el = $('setupMsg');
   el.textContent = text;
   el.classList.toggle('error', !!isError);
-  el.hidden = false;
+  el.hidden = !text;
 }
 
 // ---------- view state ----------
@@ -33,12 +36,20 @@ function showSetup() {
   $('draw').hidden = true;
   $('setupBtn').hidden = true;
   $('completeBtn').hidden = entrants.length === 0;
+  $('remaining').hidden = true;
+  hideOverlay();
 }
 function showDraw() {
   $('setup').hidden = true;
   $('draw').hidden = false;
   $('setupBtn').hidden = false;
   $('completeBtn').hidden = false;
+  $('remaining').hidden = false;
+  updatePrizePanel();
+  sizeWheel();
+  drawWheel();
+  renderRemaining();
+  updateSpinButton();
 }
 
 // ---------- prize + conference ----------
@@ -56,7 +67,8 @@ function updatePrizePanel() {
 // ---------- file load + entrant pipeline ----------
 async function loadFile(file) {
   if (!file) return;
-  showMessage('Reading ' + file.name + '…', false);
+  setSetupMsg('Reading ' + file.name + '…', false);
+  $('startBtn').disabled = true;
   try {
     const buf = new Uint8Array(await file.arrayBuffer());
     if (typeof XLSX === 'undefined') throw new Error('Spreadsheet reader failed to load. Check your connection and reload.');
@@ -75,23 +87,28 @@ async function loadFile(file) {
     candidate = -1;
     rot = 0; spinToken++; spinning = false;
 
-    const parts = [entrants.length + ' entrant' + (entrants.length === 1 ? '' : 's') + ' loaded'];
+    const parts = [entrants.length + ' entrant' + (entrants.length === 1 ? '' : 's') + ' ready'];
     if (excluded) parts.push('excluded ' + excluded + ' @' + CONFIG.EXCLUDE_DOMAINS.join('/'));
     if (merged) parts.push('merged ' + merged + ' duplicate' + (merged === 1 ? '' : 's'));
-    showMessage(parts.join(' — '), false);
-
-    showDraw();
-    hideWinner();
-    drawWheel();
-    renderRemaining();
-    updateControls();
+    setSetupMsg(parts.join(' — '), false);
+    $('startBtn').disabled = entrants.length === 0;
+    $('completeBtn').hidden = entrants.length === 0;
   } catch (err) {
-    showMessage(err.message || String(err), true);
-    showSetup();
+    entrants = [];
+    setSetupMsg(err.message || String(err), true);
+    $('startBtn').disabled = true;
   }
 }
 
 // ---------- wheel ----------
+function sizeWheel() {
+  const area = $('wheelArea');
+  const sq = $('wheelSquare');
+  const s = Math.max(140, Math.floor(Math.min(area.clientWidth, area.clientHeight)) - 8);
+  sq.style.width = s + 'px';
+  sq.style.height = s + 'px';
+}
+
 function drawWheel() {
   const n = entrants.length;
   ctx.clearRect(0, 0, SIZE, SIZE);
@@ -113,14 +130,14 @@ function drawWheel() {
     const a0 = -Math.PI / 2 + i * seg, a1 = a0 + seg;
     ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, RADIUS, a0, a1); ctx.closePath();
     ctx.fillStyle = colors[i % colors.length]; ctx.fill();
-    ctx.lineWidth = n > 60 ? 1 : 3; ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.stroke();
+    ctx.lineWidth = n > 60 ? 1 : 3; ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.stroke();
     if (showLabels) {
       ctx.save();
       ctx.rotate(a0 + seg / 2);
       ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#ffffff';
       ctx.font = `500 ${n > 24 ? 16 : 22}px ${fam}`;
       const label = entrants[i].first || entrants[i].last || '—';
-      ctx.fillText(truncate(label, 16), RADIUS - 18, 0);
+      ctx.fillText(label.length > 16 ? label.slice(0, 15) + '…' : label, RADIUS - 18, 0);
       ctx.restore();
     }
   }
@@ -128,9 +145,46 @@ function drawWheel() {
 }
 
 function renderRemaining() {
-  $('remaining').textContent = entrants.length
-    ? entrants.length + ' on the wheel'
-    : 'no entrants left';
+  $('remaining').textContent = entrants.length ? entrants.length + ' left' : 'none left';
+}
+function updateSpinButton() {
+  $('spinBtn').disabled = entrants.length === 0 || spinning;
+  $('spinBtn').textContent = entrants.length === 0
+    ? 'No entrants left'
+    : (candidate >= 0 ? 'Spin again' : 'Spin the wheel');
+}
+
+// ---------- sound ----------
+function ensureAudio() {
+  if (!audioCtx) {
+    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+  }
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+}
+function tick() {
+  if (muted || !audioCtx) return;
+  const t = audioCtx.currentTime;
+  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+  o.type = 'square'; o.frequency.value = 1100;
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.06, t + 0.004);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.045);
+  o.connect(g).connect(audioCtx.destination);
+  o.start(t); o.stop(t + 0.06);
+}
+function winChime() {
+  if (muted || !audioCtx) return;
+  const base = audioCtx.currentTime;
+  [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => {
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = 'triangle'; o.frequency.value = f;
+    const t = base + i * 0.11;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.16, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+    o.connect(g).connect(audioCtx.destination);
+    o.start(t); o.stop(t + 0.55);
+  });
 }
 
 // ---------- spin + present-to-win ----------
@@ -138,86 +192,82 @@ function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
 
 function spin() {
   if (spinning || entrants.length === 0) return;
+  ensureAudio();
   spinning = true;
   candidate = -1;
   $('spinBtn').disabled = true;
-  $('controls').hidden = true;
-  hideWinner();
+  hideOverlay();
   const myToken = ++spinToken;
-  const w = Math.floor(Math.random() * entrants.length);
-  const target = targetRotation(rot, w, entrants.length, 5);
+  const n = entrants.length;
+  const w = Math.floor(Math.random() * n);
+  const target = targetRotation(rot, w, n, 5);
   const start = rot, dur = 4500;
   let t0 = null;
+  lastSlice = sliceUnderPointer(rot, n);
   function frame(ts) {
     if (myToken !== spinToken) return;   // a reload/purge superseded this spin
     if (t0 === null) t0 = ts;
     const p = Math.min(1, (ts - t0) / dur);
     rot = start + (target - start) * easeOutCubic(p);
     drawWheel();
+    const s = sliceUnderPointer(rot, n);
+    if (s !== lastSlice) {
+      lastSlice = s;
+      const now = (typeof performance !== 'undefined' ? performance.now() : ts);
+      if (now - lastTickTime > 28) { tick(); lastTickTime = now; }
+    }
     if (p < 1) { requestAnimationFrame(frame); }
     else {
       spinning = false;
       candidate = w;
-      $('spinBtn').disabled = false;
-      showWinner(entrants[w]);
-      fireConfetti();
-      updateControls();
+      updateSpinButton();
+      showWinnerOverlay(entrants[w]);
+      winChime();
     }
   }
   requestAnimationFrame(frame);
 }
 
-function showWinner(p) {
-  const ini = ((p.first[0] || '') + (p.last[0] || '')).toUpperCase() || '★';
+// ---------- winner splash ----------
+function showWinnerOverlay(p) {
   const name = (p.first + ' ' + p.last).trim() || '(no name)';
-  $('winner').innerHTML =
-    `<div class="winner-card">
-       <div class="avatar">${escapeHtml(ini)}</div>
-       <div>
-         <div class="winner-label">Winner</div>
-         <div class="winner-name">${escapeHtml(name)}</div>
-         <div class="winner-company">${escapeHtml(p.company || '')}</div>
-       </div>
-     </div>`;
+  $('bigName').textContent = name;
+  $('bigCompany').textContent = p.company || '';
+  const prize = $('prizeTitle').value.trim();
+  $('bigPrize').textContent = prize ? 'wins ' + prize : '';
+  const pim = $('bigPrizeImg');
+  if (prizeImageUrl) { pim.src = prizeImageUrl; pim.hidden = false; }
+  else { pim.hidden = true; pim.removeAttribute('src'); }
+  $('winnerOverlay').hidden = false;
+  fireConfetti($('confettiBig'), window.innerWidth, window.innerHeight, 200);
 }
-function hideWinner() { $('winner').innerHTML = ''; }
+function hideOverlay() { $('winnerOverlay').hidden = true; }
 
-function updateControls() {
-  const hasCandidate = candidate >= 0 && !spinning;
-  $('controls').hidden = !hasCandidate;
-  $('spinBtn').disabled = entrants.length === 0 || spinning;
-  $('spinBtn').textContent = entrants.length === 0
-    ? 'No entrants left'
-    : (candidate >= 0 ? 'Spin again' : 'Spin the wheel');
-}
+function theyreHere() { hideOverlay(); }  // winner stands; operator can hit Raffle complete
 
-// "Not here" — the candidate wasn't present, so remove them and redraw.
 function notHere() {
-  if (candidate < 0 || candidate >= entrants.length) return;
+  if (candidate < 0 || candidate >= entrants.length) { hideOverlay(); return; }
   entrants.splice(candidate, 1);
   candidate = -1;
-  hideWinner();
+  hideOverlay();
   if (entrants.length === 0) {
-    drawWheel(); renderRemaining(); updateControls();
-    showMessage('No entrants left — everyone drawn was marked not present. Upload a new file or finish.', false);
+    drawWheel(); renderRemaining(); updateSpinButton();
     return;
   }
   renderRemaining();
   spin();
 }
 
-function fireConfetti() {
-  const cv = $('confetti');
-  const W = cv.width = cv.offsetWidth;
-  const H = cv.height = cv.offsetHeight;
+function fireConfetti(cv, W, H, count) {
+  cv.width = W; cv.height = H;
   const cx = cv.getContext('2d');
   const colors = CONFIG.COLORS;
   const parts = [];
-  for (let i = 0; i < 120; i++) {
+  for (let i = 0; i < count; i++) {
     parts.push({
-      x: W / 2 + (Math.random() - 0.5) * 120, y: H * 0.32,
-      vx: (Math.random() - 0.5) * 9, vy: Math.random() * -9 - 3,
-      g: 0.28 + Math.random() * 0.2, size: 5 + Math.random() * 6,
+      x: W / 2 + (Math.random() - 0.5) * W * 0.5, y: H * 0.28,
+      vx: (Math.random() - 0.5) * 12, vy: Math.random() * -11 - 3,
+      g: 0.30 + Math.random() * 0.22, size: 6 + Math.random() * 8,
       color: colors[Math.floor(Math.random() * colors.length)],
       rot: Math.random() * Math.PI, vr: (Math.random() - 0.5) * 0.3,
     });
@@ -231,14 +281,14 @@ function fireConfetti() {
       cx.fillStyle = p.color; cx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.6); cx.restore();
     }
     frames++;
-    if (frames < 150) requestAnimationFrame(step); else cx.clearRect(0, 0, W, H);
+    if (frames < 170) requestAnimationFrame(step); else cx.clearRect(0, 0, W, H);
   }
   requestAnimationFrame(step);
 }
 
 // ---------- GDPR purge ----------
 function raffleComplete() {
-  if (entrants.length === 0 && candidate < 0) { return; }
+  if (entrants.length === 0 && candidate < 0) return;
   const ok = window.confirm('Raffle complete? This permanently deletes the uploaded entrants and all their data from this browser.');
   if (!ok) return;
   entrants = [];
@@ -246,12 +296,19 @@ function raffleComplete() {
   rot = 0; spinToken++; spinning = false;
   $('odsFile').value = '';
   if (ctx) ctx.clearRect(0, 0, SIZE, SIZE);
-  hideWinner();
-  showMessage('Entrant data purged. Upload a new file to run another raffle.', false);
+  hideOverlay();
+  setSetupMsg('Entrant data purged. Upload a new file to run another raffle.', false);
+  $('startBtn').disabled = true;
   showSetup();
 }
 
 // ---------- init ----------
+function toggleMute() {
+  muted = !muted;
+  $('muteBtn').textContent = muted ? 'Sound: off' : 'Sound: on';
+  $('muteBtn').setAttribute('aria-pressed', String(muted));
+}
+
 function init() {
   canvas = $('wheel');
   ctx = canvas.getContext('2d');
@@ -276,10 +333,14 @@ function init() {
     if (file) loadFile(file);
   });
 
+  $('startBtn').addEventListener('click', () => { if (entrants.length) showDraw(); });
   $('spinBtn').addEventListener('click', spin);
-  $('notHereBtn').addEventListener('click', notHere);
+  $('hereBtn').addEventListener('click', theyreHere);
+  $('notHereBig').addEventListener('click', notHere);
   $('setupBtn').addEventListener('click', showSetup);
   $('completeBtn').addEventListener('click', raffleComplete);
+  $('muteBtn').addEventListener('click', toggleMute);
+  window.addEventListener('resize', () => { if (!$('draw').hidden) { sizeWheel(); drawWheel(); } });
 
   showSetup();
 }
