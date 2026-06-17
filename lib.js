@@ -21,3 +21,22 @@ export function parseCSV(text) {
   if (field.length > 0 || row.length > 0) { row.push(field); rows.push(row); }
   return rows;
 }
+
+export function deriveCsvUrl(sheetUrl) {
+  const url = String(sheetUrl || '').trim();
+  if (!url) throw new Error('No sheet URL configured');
+  if (url.endsWith('.csv')) return url;
+  if (url.includes('output=csv')) return url;
+  if (url.includes('/spreadsheets/d/e/')) {
+    const base = url.split('#')[0];
+    const sep = base.includes('?') ? '&' : '?';
+    return base + sep + 'output=csv';
+  }
+  const idMatch = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  if (!idMatch) throw new Error('Could not find a Google Sheet id in that URL');
+  const id = idMatch[1];
+  const gidMatch = url.match(/[#&?]gid=([0-9]+)/);
+  let out = `https://docs.google.com/spreadsheets/d/${id}/gviz/tq?tqx=out:csv`;
+  if (gidMatch) out += `&gid=${gidMatch[1]}`;
+  return out;
+}
