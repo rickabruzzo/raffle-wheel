@@ -1,46 +1,5 @@
 // Pure, DOM-free helpers for the raffle wheel. Tested in test/lib.test.js.
 
-export function parseCSV(text) {
-  text = String(text).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-  const rows = [];
-  let row = [], field = '', inQuotes = false, i = 0;
-  while (i < text.length) {
-    const c = text[i];
-    if (inQuotes) {
-      if (c === '"') {
-        if (text[i + 1] === '"') { field += '"'; i += 2; continue; }
-        inQuotes = false; i++; continue;
-      }
-      field += c; i++; continue;
-    }
-    if (c === '"') { inQuotes = true; i++; continue; }
-    if (c === ',') { row.push(field); field = ''; i++; continue; }
-    if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; i++; continue; }
-    field += c; i++;
-  }
-  if (field.length > 0 || row.length > 0) { row.push(field); rows.push(row); }
-  return rows;
-}
-
-export function deriveCsvUrl(sheetUrl) {
-  const url = String(sheetUrl || '').trim();
-  if (!url) throw new Error('No sheet URL configured');
-  if (url.endsWith('.csv')) return url;
-  if (url.includes('output=csv')) return url;
-  if (url.includes('/spreadsheets/d/e/')) {
-    const base = url.split('#')[0];
-    const sep = base.includes('?') ? '&' : '?';
-    return base + sep + 'output=csv';
-  }
-  const idMatch = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
-  if (!idMatch) throw new Error('Could not find a Google Sheet id in that URL');
-  const id = idMatch[1];
-  const gidMatch = url.match(/[#&?]gid=([0-9]+)/);
-  let out = `https://docs.google.com/spreadsheets/d/${id}/gviz/tq?tqx=out:csv`;
-  if (gidMatch) out += `&gid=${gidMatch[1]}`;
-  return out;
-}
-
 function norm(s) { return String(s == null ? '' : s).trim().toLowerCase(); }
 
 export function findColumns(headerRow) {
@@ -51,12 +10,13 @@ export function findColumns(headerRow) {
     company: h.findIndex(x =>
       x.includes('company') || x.includes('organization') || x.includes('organisation') ||
       x === 'org' || x.includes('employer')),
+    email: h.findIndex(x => x.includes('email') || x.includes('e-mail')),
     name: h.findIndex(x => x === 'name' || x.includes('full name')),
   };
 }
 
 export function rowsToEntrants(rows) {
-  if (!rows || rows.length < 2) throw new Error('The sheet has no data rows.');
+  if (!rows || rows.length < 2) throw new Error('The spreadsheet has no data rows.');
   const cols = findColumns(rows[0]);
   if (cols.first < 0 && cols.last < 0 && cols.name < 0) {
     throw new Error(
@@ -79,11 +39,47 @@ export function rowsToEntrants(rows) {
       last = cols.last >= 0 ? String(row[cols.last] || '').trim() : '';
     }
     const company = cols.company >= 0 ? String(row[cols.company] || '').trim() : '';
+    const email = cols.email >= 0 ? String(row[cols.email] || '').trim() : '';
     if (first === '' && last === '' && company === '') continue;
-    entrants.push({ first, last, company });
+    entrants.push({ first, last, company, email });
   }
-  if (entrants.length === 0) throw new Error('No entrants found in the sheet.');
+  if (entrants.length === 0) throw new Error('No entrants found in the spreadsheet.');
   return entrants;
+}
+
+function emailDomain(email) {
+  const e = String(email || '').trim().toLowerCase();
+  const at = e.lastIndexOf('@');
+  return at === -1 ? '' : e.slice(at + 1);
+}
+
+// Drop entrants whose email domain matches a listed domain exactly or as a
+// subdomain (e.g. "honeycomb.io" also drops "eng.honeycomb.io"). Entrants with
+// no email cannot match and are kept.
+export function excludeByDomain(entrants, domains) {
+  const bad = (domains || []).map(d => String(d).trim().toLowerCase()).filter(Boolean);
+  if (!bad.length) return entrants.slice();
+  return entrants.filter(e => {
+    const dom = emailDomain(e.email);
+    if (!dom) return true;
+    return !bad.some(d => dom === d || dom.endsWith('.' + d));
+  });
+}
+
+// Keep the first entrant per unique email (case-insensitive). Entrants with no
+// email are all kept (nothing to de-duplicate on).
+export function dedupeByEmail(entrants) {
+  const seen = new Set();
+  const out = [];
+  for (const e of entrants) {
+    const key = String(e.email || '').trim().toLowerCase();
+    if (key) {
+      if (seen.has(key)) continue;
+      seen.add(key);
+    }
+    out.push(e);
+  }
+  return out;
 }
 
 const TAU = Math.PI * 2;
