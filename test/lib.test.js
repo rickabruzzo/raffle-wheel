@@ -48,3 +48,34 @@ test('deriveCsvUrl passes through a local .csv path', () => {
 test('deriveCsvUrl throws on a non-sheet URL', () => {
   assert.throws(() => deriveCsvUrl('https://example.com/nope'));
 });
+
+import { findColumns, rowsToEntrants } from '../lib.js';
+
+test('findColumns locates first/last/company among extra columns', () => {
+  const cols = findColumns(['Timestamp', 'Email', 'First Name', 'Last Name', 'Company']);
+  assert.equal(cols.first, 2);
+  assert.equal(cols.last, 3);
+  assert.equal(cols.company, 4);
+});
+
+test('rowsToEntrants maps separate columns and ignores extras', () => {
+  const rows = [
+    ['Timestamp', 'First Name', 'Last Name', 'Company'],
+    ['09:01', 'Mia', 'Chen', 'Tilt Labs'],
+  ];
+  assert.deepEqual(rowsToEntrants(rows), [{ first: 'Mia', last: 'Chen', company: 'Tilt Labs' }]);
+});
+
+test('rowsToEntrants splits a combined Name column', () => {
+  const rows = [['Name', 'Company'], ['Ada Lovelace', 'Analytical Engines']];
+  assert.deepEqual(rowsToEntrants(rows), [{ first: 'Ada', last: 'Lovelace', company: 'Analytical Engines' }]);
+});
+
+test('rowsToEntrants skips fully blank rows', () => {
+  const rows = [['First', 'Last', 'Company'], ['', '', ''], ['Sam', 'Okafor', 'Flipper']];
+  assert.equal(rowsToEntrants(rows).length, 1);
+});
+
+test('rowsToEntrants throws when no name columns exist', () => {
+  assert.throws(() => rowsToEntrants([['Color', 'Size'], ['red', 'L']]));
+});

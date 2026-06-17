@@ -40,3 +40,48 @@ export function deriveCsvUrl(sheetUrl) {
   if (gidMatch) out += `&gid=${gidMatch[1]}`;
   return out;
 }
+
+function norm(s) { return String(s == null ? '' : s).trim().toLowerCase(); }
+
+export function findColumns(headerRow) {
+  const h = (headerRow || []).map(norm);
+  return {
+    first: h.findIndex(x => x.includes('first')),
+    last: h.findIndex(x => x.includes('last')),
+    company: h.findIndex(x =>
+      x.includes('company') || x.includes('organization') || x.includes('organisation') ||
+      x === 'org' || x.includes('employer')),
+    name: h.findIndex(x => x === 'name' || x.includes('full name')),
+  };
+}
+
+export function rowsToEntrants(rows) {
+  if (!rows || rows.length < 2) throw new Error('The sheet has no data rows.');
+  const cols = findColumns(rows[0]);
+  if (cols.first < 0 && cols.last < 0 && cols.name < 0) {
+    throw new Error(
+      'Could not find name columns. Expected headers containing "First"/"Last" or "Name". Saw: ' +
+      rows[0].join(', '));
+  }
+  const useSplit = (cols.first < 0 || cols.last < 0) && cols.name >= 0;
+  const entrants = [];
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r] || [];
+    if (row.every(c => norm(c) === '')) continue;
+    let first = '', last = '';
+    if (useSplit) {
+      const full = String(row[cols.name] || '').trim();
+      const sp = full.indexOf(' ');
+      if (sp === -1) { first = full; last = ''; }
+      else { first = full.slice(0, sp); last = full.slice(sp + 1).trim(); }
+    } else {
+      first = cols.first >= 0 ? String(row[cols.first] || '').trim() : '';
+      last = cols.last >= 0 ? String(row[cols.last] || '').trim() : '';
+    }
+    const company = cols.company >= 0 ? String(row[cols.company] || '').trim() : '';
+    if (first === '' && last === '' && company === '') continue;
+    entrants.push({ first, last, company });
+  }
+  if (entrants.length === 0) throw new Error('No entrants found in the sheet.');
+  return entrants;
+}
