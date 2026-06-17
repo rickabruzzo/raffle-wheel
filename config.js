@@ -1,9 +1,8 @@
-// The only file you edit. Paste your published Google Sheet link into SHEET_URL.
-// The sheet must be shared as "anyone with the link can view" (or Published to web).
+// Tunable knobs. Entries are uploaded as an .ods file in the page itself.
 export const CONFIG = {
-  // e.g. "https://docs.google.com/spreadsheets/d/<your-id>/edit#gid=0"
-  // Leave as "./sample.csv" to preview with bundled sample data.
-  SHEET_URL: "./sample.csv",
+  // Email domains whose entries are dropped before the wheel (employees / test
+  // accounts). Matches the domain exactly OR any subdomain, case-insensitive.
+  EXCLUDE_DOMAINS: ["honeycomb.io"],
 
   // Above this many entrants, slices render without text (names become unreadable).
   MAX_LABELS: 40,

@@ -1,27 +1,24 @@
 import { CONFIG } from './config.js';
-import { parseCSV, deriveCsvUrl, rowsToEntrants, targetRotation } from './lib.js';
+import { rowsToEntrants, excludeByDomain, dedupeByEmail, targetRotation } from './lib.js';
+
+// XLSX is the global from vendor/xlsx.full.min.js (loaded as a classic script first).
 
 const $ = (id) => document.getElementById(id);
 const SIZE = 600, R = SIZE / 2, RADIUS = R - 8;
+const LS_CONF = 'raffleConfName';
+const LS_PRIZE = 'rafflePrizeTitle';
 
 let canvas, ctx;
-let allEntrants = [];   // full list loaded from the sheet
-let entrants = [];      // current wheel (after removals)
-let winners = [];       // [{first,last,company}]
-let rot = 0;            // current wheel rotation (radians)
-let spinning = false;
-let spinToken = 0;      // bumped whenever the entrant list changes, to cancel a stale spin
-let lastWinnerIndex = -1;
+let entrants = [];        // current wheel (PII held only in memory, never persisted)
+let candidate = -1;       // index in entrants of the person the wheel last landed on
+let rot = 0, spinning = false, spinToken = 0;
+let prizeImageUrl = null; // object URL, in memory only
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 function truncate(s, max) { return s.length > max ? s.slice(0, max - 1) + '…' : s; }
-
-function activeSheetUrl() {
-  return localStorage.getItem('raffleSheetOverride') || CONFIG.SHEET_URL || '';
-}
 
 function showMessage(text, isError) {
   const el = $('message');
@@ -31,40 +28,71 @@ function showMessage(text, isError) {
 }
 function clearMessage() { $('message').hidden = true; }
 
-async function loadEntrants() {
-  const sheetUrl = activeSheetUrl();
-  if (!sheetUrl) {
-    showMessage('No sheet configured yet. Open config.js and set SHEET_URL, or use the "different sheet" box below.', false);
-    return;
-  }
-  showMessage('Loading entrants…', false);
+// ---------- view state ----------
+function showSetup() {
+  $('setup').hidden = false;
+  $('draw').hidden = true;
+  $('setupBtn').hidden = true;
+  $('completeBtn').hidden = entrants.length === 0;
+}
+function showDraw() {
+  $('setup').hidden = true;
+  $('draw').hidden = false;
+  $('setupBtn').hidden = false;
+  $('completeBtn').hidden = false;
+}
+
+// ---------- prize + conference ----------
+function updatePrizePanel() {
+  const title = $('prizeTitle').value.trim();
+  const view = $('prizeImgView');
+  if (prizeImageUrl) { view.src = prizeImageUrl; view.hidden = false; }
+  else { view.hidden = true; view.removeAttribute('src'); }
+  $('prizeTitleView').textContent = title;
+  const panel = $('prizePanel');
+  panel.hidden = !(title || prizeImageUrl);
+  panel.classList.toggle('no-img', !prizeImageUrl);
+}
+
+// ---------- file load + entrant pipeline ----------
+async function loadFile(file) {
+  if (!file) return;
+  showMessage('Reading ' + file.name + '…', false);
   try {
-    const res = await fetch(deriveCsvUrl(sheetUrl));
-    if (!res.ok) {
-      throw new Error(`Could not load the sheet (HTTP ${res.status}). Make sure it is shared as "anyone with the link can view".`);
-    }
-    const rows = parseCSV(await res.text());
-    allEntrants = rowsToEntrants(rows);
-    spinToken++;        // supersede any spin animation still in flight
-    spinning = false;
-    entrants = allEntrants.slice();
-    winners = [];
-    lastWinnerIndex = -1;
-    clearMessage();
+    const buf = new Uint8Array(await file.arrayBuffer());
+    if (typeof XLSX === 'undefined') throw new Error('Spreadsheet reader failed to load. Check your connection and reload.');
+    const wb = XLSX.read(buf, { type: 'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    if (!ws) throw new Error('That file has no sheets.');
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: '' });
+
+    const mapped = rowsToEntrants(rows);
+    const afterExclude = excludeByDomain(mapped, CONFIG.EXCLUDE_DOMAINS);
+    const deduped = dedupeByEmail(afterExclude);
+    const excluded = mapped.length - afterExclude.length;
+    const merged = afterExclude.length - deduped.length;
+
+    entrants = deduped;
+    candidate = -1;
+    rot = 0; spinToken++; spinning = false;
+
+    const parts = [entrants.length + ' entrant' + (entrants.length === 1 ? '' : 's') + ' loaded'];
+    if (excluded) parts.push('excluded ' + excluded + ' @' + CONFIG.EXCLUDE_DOMAINS.join('/'));
+    if (merged) parts.push('merged ' + merged + ' duplicate' + (merged === 1 ? '' : 's'));
+    showMessage(parts.join(' — '), false);
+
+    showDraw();
     hideWinner();
-    renderAll();
+    drawWheel();
+    renderRemaining();
+    updateControls();
   } catch (err) {
     showMessage(err.message || String(err), true);
+    showSetup();
   }
 }
 
-function renderAll() {
-  drawWheel();
-  renderWinnersList();
-  renderRemaining();
-  updateControls();
-}
-
+// ---------- wheel ----------
 function drawWheel() {
   const n = entrants.length;
   ctx.clearRect(0, 0, SIZE, SIZE);
@@ -102,27 +130,27 @@ function drawWheel() {
 
 function renderRemaining() {
   $('remaining').textContent = entrants.length
-    ? `${entrants.length} on the wheel · ${winners.length} drawn`
-    : 'everyone has won';
+    ? entrants.length + ' on the wheel'
+    : 'no entrants left';
 }
 
-function hideWinner() { $('winner').innerHTML = ''; }
-
+// ---------- spin + present-to-win ----------
 function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
 
 function spin() {
   if (spinning || entrants.length === 0) return;
   spinning = true;
-  const myToken = ++spinToken;
+  candidate = -1;
   $('spinBtn').disabled = true;
   $('controls').hidden = true;
   hideWinner();
+  const myToken = ++spinToken;
   const w = Math.floor(Math.random() * entrants.length);
   const target = targetRotation(rot, w, entrants.length, 5);
   const start = rot, dur = 4500;
   let t0 = null;
   function frame(ts) {
-    if (myToken !== spinToken) return;   // a reload/reset superseded this spin
+    if (myToken !== spinToken) return;   // a reload/purge superseded this spin
     if (t0 === null) t0 = ts;
     const p = Math.min(1, (ts - t0) / dur);
     rot = start + (target - start) * easeOutCubic(p);
@@ -130,22 +158,14 @@ function spin() {
     if (p < 1) { requestAnimationFrame(frame); }
     else {
       spinning = false;
+      candidate = w;
       $('spinBtn').disabled = false;
-      lastWinnerIndex = w;
-      onWin(w);
+      showWinner(entrants[w]);
+      fireConfetti();
+      updateControls();
     }
   }
   requestAnimationFrame(frame);
-}
-
-function onWin(index) {
-  const winner = entrants[index];
-  winners.push(winner);
-  showWinner(winner);
-  fireConfetti();
-  renderWinnersList();
-  renderRemaining();
-  updateControls();
 }
 
 function showWinner(p) {
@@ -160,6 +180,31 @@ function showWinner(p) {
          <div class="winner-company">${escapeHtml(p.company || '')}</div>
        </div>
      </div>`;
+}
+function hideWinner() { $('winner').innerHTML = ''; }
+
+function updateControls() {
+  const hasCandidate = candidate >= 0 && !spinning;
+  $('controls').hidden = !hasCandidate;
+  $('spinBtn').disabled = entrants.length === 0 || spinning;
+  $('spinBtn').textContent = entrants.length === 0
+    ? 'No entrants left'
+    : (candidate >= 0 ? 'Spin again' : 'Spin the wheel');
+}
+
+// "Not here" — the candidate wasn't present, so remove them and redraw.
+function notHere() {
+  if (candidate < 0 || candidate >= entrants.length) return;
+  entrants.splice(candidate, 1);
+  candidate = -1;
+  hideWinner();
+  if (entrants.length === 0) {
+    drawWheel(); renderRemaining(); updateControls();
+    showMessage('No entrants left — everyone drawn was marked not present. Upload a new file or finish.', false);
+    return;
+  }
+  renderRemaining();
+  spin();
 }
 
 function fireConfetti() {
@@ -192,69 +237,51 @@ function fireConfetti() {
   requestAnimationFrame(step);
 }
 
-function renderWinnersList() {
-  $('winnersList').innerHTML = winners.map(w => {
-    const name = escapeHtml((w.first + ' ' + w.last).trim() || '(no name)');
-    const co = w.company ? ` <span class="co">— ${escapeHtml(w.company)}</span>` : '';
-    return `<li>${name}${co}</li>`;
-  }).join('');
-}
-
-function updateControls() {
-  const controls = $('controls');
-  const hasWinnerShown = !!$('winner').innerHTML.trim();
-  controls.hidden = !hasWinnerShown || entrants.length === 0;
-  $('spinBtn').disabled = entrants.length === 0 || spinning;
-  if (entrants.length === 0) {
-    $('spinBtn').textContent = 'Everyone has won';
-  } else {
-    $('spinBtn').textContent = winners.length ? 'Spin again' : 'Spin the wheel';
-  }
-}
-
-function removeAndRespin() {
-  if (lastWinnerIndex >= 0 && lastWinnerIndex < entrants.length) {
-    entrants.splice(lastWinnerIndex, 1);
-    lastWinnerIndex = -1;
-  }
+// ---------- GDPR purge ----------
+function raffleComplete() {
+  if (entrants.length === 0 && candidate < 0) { return; }
+  const ok = window.confirm('Raffle complete? This permanently deletes the uploaded entrants and all their data from this browser.');
+  if (!ok) return;
+  entrants = [];
+  candidate = -1;
+  rot = 0; spinToken++; spinning = false;
+  $('odsFile').value = '';
+  if (ctx) ctx.clearRect(0, 0, SIZE, SIZE);
   hideWinner();
-  if (entrants.length === 0) {
-    drawWheel(); renderRemaining(); updateControls();
-    showMessage('Everyone has won. Use "Reload from sheet" to start over.', false);
-    return;
-  }
-  renderAll();
-  spin();
+  showMessage('Entrant data purged. Upload a new file to run another raffle.', false);
+  showSetup();
 }
 
-function keepAndRespin() {
-  hideWinner();
-  renderAll();
-  spin();
-}
-
-function applyOverride() {
-  const val = $('sheetOverride').value.trim();
-  if (!val) return;
-  localStorage.setItem('raffleSheetOverride', val);
-  loadEntrants();
-}
-
-function clearOverride() {
-  localStorage.removeItem('raffleSheetOverride');
-  $('sheetOverride').value = '';
-  loadEntrants();
-}
-
+// ---------- init ----------
 function init() {
   canvas = $('wheel');
   ctx = canvas.getContext('2d');
-  $('resetBtn').addEventListener('click', loadEntrants);
+
+  $('confName').value = localStorage.getItem(LS_CONF) || '';
+  $('prizeTitle').value = localStorage.getItem(LS_PRIZE) || '';
+  updatePrizePanel();
+
+  $('confName').addEventListener('input', () => localStorage.setItem(LS_CONF, $('confName').value));
+  $('prizeTitle').addEventListener('input', () => {
+    localStorage.setItem(LS_PRIZE, $('prizeTitle').value);
+    updatePrizePanel();
+  });
+  $('prizeImg').addEventListener('change', (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (prizeImageUrl) { URL.revokeObjectURL(prizeImageUrl); prizeImageUrl = null; }
+    if (file) prizeImageUrl = URL.createObjectURL(file);
+    updatePrizePanel();
+  });
+  $('odsFile').addEventListener('change', (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (file) loadFile(file);
+  });
+
   $('spinBtn').addEventListener('click', spin);
-  $('removeBtn').addEventListener('click', removeAndRespin);
-  $('keepBtn').addEventListener('click', keepAndRespin);
-  $('applyOverride').addEventListener('click', applyOverride);
-  $('clearOverride').addEventListener('click', clearOverride);
-  loadEntrants();
+  $('notHereBtn').addEventListener('click', notHere);
+  $('setupBtn').addEventListener('click', showSetup);
+  $('completeBtn').addEventListener('click', raffleComplete);
+
+  showSetup();
 }
 init();

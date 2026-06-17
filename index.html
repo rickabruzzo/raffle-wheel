@@ -8,46 +8,64 @@
 </head>
 <body>
   <header class="topbar">
-    <h1>Raffle wheel</h1>
-    <div class="topbar-right">
-      <span id="remaining" class="remaining"></span>
-      <button id="resetBtn" type="button">Reload from sheet</button>
+    <div class="brand">
+      <img class="logo" src="assets/honeycomb-logo.svg" alt="Honeycomb" />
+      <span class="divider" aria-hidden="true">│</span>
+      <input id="confName" class="conf-name" type="text" placeholder="Conference name" aria-label="Conference name" />
+    </div>
+    <div class="topbar-actions">
+      <button id="setupBtn" type="button" hidden>Setup</button>
+      <button id="completeBtn" class="danger" type="button" hidden>Raffle complete</button>
     </div>
   </header>
 
   <div id="message" class="message" hidden></div>
 
-  <div class="layout">
-    <main class="stage">
-      <div class="wheel-wrap">
-        <canvas id="wheel" width="600" height="600" aria-label="Raffle wheel"></canvas>
-        <div class="pointer" aria-hidden="true"></div>
-        <div class="hub" aria-hidden="true"></div>
-        <canvas id="confetti" class="confetti" aria-hidden="true"></canvas>
-      </div>
-      <button id="spinBtn" class="spin-btn" type="button">Spin the wheel</button>
-      <div id="winner" aria-live="polite"></div>
-      <div id="controls" class="controls" hidden>
-        <button id="removeBtn" type="button">Remove winner &amp; spin again</button>
-        <button id="keepBtn" type="button">Keep &amp; spin again</button>
-      </div>
-    </main>
+  <section id="setup" class="setup">
+    <h2>Set up the raffle</h2>
+    <label class="field">
+      <span>Prize title</span>
+      <input id="prizeTitle" type="text" placeholder="e.g. Sphero BOLT robot" />
+    </label>
+    <label class="field">
+      <span>Prize image — optional, transparent PNG</span>
+      <input id="prizeImg" type="file" accept="image/*" />
+    </label>
+    <label class="field">
+      <span>Entrants spreadsheet (.ods)</span>
+      <input id="odsFile" type="file" accept=".ods,application/vnd.oasis.opendocument.spreadsheet" />
+    </label>
+    <p class="hint">
+      The file needs columns for First name, Last name, Company, and Email. Email is
+      used only to drop duplicates and <code>@honeycomb.io</code> entries — it is never shown.
+    </p>
+  </section>
 
-    <aside class="winners-panel">
-      <h2>Winners</h2>
-      <ol id="winnersList" class="winners-list"></ol>
-    </aside>
-  </div>
-
-  <details class="override">
-    <summary>Use a different sheet (this browser only)</summary>
-    <div class="override-row">
-      <input id="sheetOverride" type="url" placeholder="Paste a Google Sheet link" />
-      <button id="applyOverride" type="button">Use this sheet</button>
-      <button id="clearOverride" type="button">Clear</button>
+  <main id="draw" class="draw" hidden>
+    <div id="prizePanel" class="prize" hidden>
+      <img id="prizeImgView" class="prize-img" alt="" hidden />
+      <div class="prize-text">
+        <div class="prize-label">Prize</div>
+        <div id="prizeTitleView" class="prize-title"></div>
+      </div>
     </div>
-  </details>
 
+    <div class="wheel-wrap">
+      <canvas id="wheel" width="600" height="600" aria-label="Raffle wheel"></canvas>
+      <div class="pointer" aria-hidden="true"></div>
+      <div class="hub" aria-hidden="true"></div>
+      <canvas id="confetti" class="confetti" aria-hidden="true"></canvas>
+    </div>
+
+    <div id="remaining" class="remaining"></div>
+    <button id="spinBtn" class="spin-btn" type="button">Spin the wheel</button>
+    <div id="winner" aria-live="polite"></div>
+    <div id="controls" class="controls" hidden>
+      <button id="notHereBtn" type="button">Not here — remove &amp; spin again</button>
+    </div>
+  </main>
+
+  <script src="vendor/xlsx.full.min.js"></script>
   <script type="module" src="app.js"></script>
 </body>
 </html>
