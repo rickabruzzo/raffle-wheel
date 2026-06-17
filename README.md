@@ -15,7 +15,8 @@ ever sent to a server.
      are dropped automatically.
    - Duplicate emails are merged.
    - Email is used only for those two steps — it is never displayed.
-3. **Spin.** When the wheel lands on someone:
+3. Hit **Start raffle →** for the full-screen wheel (toggle effects with
+   **Sound: on/off** in the top bar). **Spin.** When the wheel lands on someone:
    - If they're in the room, they win.
    - If not, click **Not here — remove & spin again** to drop them and redraw.
 4. **Raffle complete** wipes the uploaded entrants and all their data from the

@@ -236,3 +236,27 @@ The wheel rendering and the choose-winner-first spin geometry are unchanged.
   email de-dupe, email-column detection, email never surfaced in the mapped entrant).
 - ODS parsing + the full UI (upload → filter summary → spin → present-to-win →
   purge → empty state) verified by running against `sample.ods`.
+
+---
+
+## Amendment v3 (2026-06-17) — show-time presentation
+
+Presentation only; the v2 data pipeline and winner logic are unchanged.
+
+- **Two screens.** Setup (conference / prize / file upload / load summary +
+  "Start raffle →") and a clean full-screen spin view with none of the inputs. A
+  header "Setup" button returns to setup; loaded entrants persist across the toggle.
+- **One screen, no scroll.** The spin view is locked to the viewport
+  (`body { height:100dvh; overflow:hidden }`); the wheel auto-sizes to the
+  available square in JS (`sizeWheel`, re-run on `resize`).
+- **Big winner splash.** A fixed full-screen overlay: prize image (if uploaded),
+  "WINNER", the name at `clamp(44px,12vw,150px)`, company, "wins <prize>", and
+  full-screen confetti. Actions: "They're here — done" (dismiss) and
+  "Not here — spin again" (remove the candidate + redraw).
+- **Sound.** Web Audio, no asset files: a ratchet tick on each slice-pass that
+  slows with the wheel (throttled to ≥28 ms apart) and a four-note win chime.
+  A "Sound: on/off" header toggle; the AudioContext is created/resumed on the
+  spin click (autoplay-policy safe).
+- **CSS note:** an explicit `[hidden] { display: none !important; }` is required
+  because `.draw`/`.overlay`/`.prize` set `display` via their class, which would
+  otherwise override the user-agent `[hidden]` rule and leave them visible.
