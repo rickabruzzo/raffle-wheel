@@ -1,18 +1,35 @@
 # Raffle wheel
 
-A web page that reads raffle entrants from a Google Sheet, spins a wheel, and
-reveals a random winner (first name, last name, company). Hosted on Vercel.
+A public web page that runs a "must be present to win" raffle: upload your
+entrants as an OpenDocument Spreadsheet (`.ods`), spin a wheel, and reveal a
+random winner (first name, last name, company). Hosted on Vercel; nothing is
+ever sent to a server.
 
-## Configure your sheet
+## Run the raffle
 
-1. In Google Sheets: Share → General access → "Anyone with the link" → Viewer.
-   (Or File → Share → Publish to web.)
-2. Copy the sheet URL from the address bar.
-3. Open `config.js` and paste it into `SHEET_URL`. The sheet needs columns whose
-   headers contain "First", "Last", and "Company" (extra columns are ignored).
-4. Commit and push — Vercel redeploys automatically.
+1. Open the page. Optionally set the **conference name**, a **prize title**, and
+   upload a transparent **prize PNG**.
+2. Upload your **entrants `.ods`**. The file needs columns whose headers contain
+   **First**, **Last**, **Company**, and **Email**.
+   - `@honeycomb.io` addresses (employees / test entries, including subdomains)
+     are dropped automatically.
+   - Duplicate emails are merged.
+   - Email is used only for those two steps — it is never displayed.
+3. **Spin.** When the wheel lands on someone:
+   - If they're in the room, they win.
+   - If not, click **Not here — remove & spin again** to drop them and redraw.
+4. **Raffle complete** wipes the uploaded entrants and all their data from the
+   browser (GDPR), returning to the upload screen.
 
-Entrant changes in the sheet show up on the next page load — no redeploy needed.
+Entrant data lives only in memory — it is never written to disk, never uploaded,
+and does not survive a page reload. `sample.ods` is included if you want to try
+it.
+
+## Configure
+
+`config.js` holds the tunables: `EXCLUDE_DOMAINS` (default `["honeycomb.io"]`),
+`MAX_LABELS` (above this many entrants, slices render without text), and the
+slice `COLORS`.
 
 ## Run locally
 
@@ -21,15 +38,18 @@ python3 -m http.server 5000
 # open http://localhost:5000
 ```
 
-Leave `SHEET_URL` as `./sample.csv` to preview with bundled sample data.
-
 ## Tests
 
 ```
 node --test
 ```
 
+Pure logic (column detection, domain exclusion, de-dupe, wheel geometry) lives in
+`lib.js` and is unit-tested. ODS parsing uses the vendored SheetJS
+(`vendor/xlsx.full.min.js`). To regenerate the sample file:
+`python3 scripts/make_sample_ods.py`.
+
 ## Deploy
 
 Connected to Vercel via GitHub: every push to `main` auto-deploys. No build step
-(static site).
+(static site). Anyone with the URL can use it — no account needed.

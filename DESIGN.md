@@ -147,3 +147,92 @@ load. Redeploys are only for code/config changes.
 No login/access control, no editing the sheet from the page, no weighted odds,
 no de-duplication, no prize-tier metadata beyond sequential draws, no animations
 beyond the spin and confetti. These can go on a later list if wanted.
+
+---
+
+## Amendment v2 (2026-06-17) — ODS upload, single present-to-win winner, branding, GDPR purge
+
+This amendment is the current truth where it conflicts with the v1 body above.
+The wheel rendering and the choose-winner-first spin geometry are unchanged.
+
+### Data input: local ODS upload replaces Google Sheets
+
+- Google Sheets / `SHEET_URL` / live CSV fetch / the per-browser sheet override are
+  all removed. Instead the operator uploads an OpenDocument Spreadsheet (`.ods`) in
+  the page. It is parsed entirely in the browser; nothing is uploaded to any server.
+- Parsing uses the SheetJS library, **vendored into the repo** (`vendor/xlsx.full.min.js`)
+  so it works without a CDN / on poor conference wifi. SheetJS reads the first sheet
+  into an array-of-rows, which then flows through the existing column logic.
+- `sample.csv` is replaced by `sample.ods` for local verification.
+
+### Entrant pipeline (on file load), in order
+
+1. Parse the `.ods` first sheet to rows.
+2. **Exclude** any row whose email domain is in `CONFIG.EXCLUDE_DOMAINS` (default
+   `["honeycomb.io"]`) — matches the domain exactly *or* a subdomain
+   (`eng.honeycomb.io`), case-insensitive. These are employees / test entries.
+3. **De-duplicate** by email (lower-cased, trimmed); keep the first occurrence.
+   Rows with no email are kept as-is (cannot be deduped or domain-checked).
+4. Map to `{first, last, company}`. The email column is detected and used for
+   steps 2–3 but is **never displayed**.
+5. Show a load summary, e.g. "248 entrants loaded — excluded 11 @honeycomb.io,
+   merged 3 duplicates", so the operator can confirm the filters fired.
+
+`findColumns` gains an `email` match (header contains `email` / `e-mail`).
+
+### Winner model: single winner, present-to-win
+
+- There is exactly one prize and one winner per raffle.
+- A spin lands on a candidate, shown in the winner card. If that person is in the
+  room, they win — done. If not, **"Not here — remove & spin again"** removes that
+  entrant from the wheel and immediately redraws.
+- The accumulating winners list is **removed**. No-shows are never recorded or
+  displayed anywhere. ("Keep & spin again" and the winners panel from v1 are gone.)
+
+### Branding, conference, prize
+
+- Honeycomb logo in the header (the provided RGB SVG with the wordmark recolored to
+  white for the dark UI; hexagon colors unchanged), vendored at `assets/honeycomb-logo.svg`.
+- Conference-name text field, shown in the header next to the logo.
+- Optional prize: a transparent PNG upload + a prize-title text field, shown in a
+  prize panel near the wheel. Layout adapts: image + title; title only (no image);
+  or panel hidden (neither). Image is held in memory (object URL), not persisted.
+
+### Raffle complete → GDPR purge
+
+- A "Raffle complete" control (header). On confirm, it wipes all loaded entrant data
+  and the parsed file from memory, clears any browser storage this app set, and
+  returns to the empty upload screen.
+
+### Persistence policy
+
+- Entrant data and the uploaded file are **never** persisted (no `localStorage`,
+  no `IndexedDB`, no server) and do not survive a reload — this is what makes the
+  purge complete. Only non-PII setup values (conference name, prize title) may be
+  kept in `localStorage` for convenience, and the purge clears those too.
+
+### Sharing / hosting
+
+- Unchanged: public static site on Vercel, GitHub auto-deploy. Visitors need no
+  account and nothing installed — each runs the tool client-side (uploads their own
+  `.ods`). It is a tool, not a shared live view (the latter would need a server and
+  is explicitly out of scope, per the GDPR policy above).
+
+### Files touched
+
+- Add: `vendor/xlsx.full.min.js` (SheetJS), `assets/honeycomb-logo.svg`, `sample.ods`.
+- Remove: `sample.csv`. Repurpose: `config.js` (`SHEET_URL` → `EXCLUDE_DOMAINS`,
+  keep `MAX_LABELS`, `COLORS`).
+- Rework: `index.html` (header/logo/conference/prize/upload + draw states),
+  `styles.css` (adaptive layout), `app.js` (file upload + ODS parse + pipeline +
+  single-winner flow + purge).
+- `lib.js` gains pure, tested helpers: `excludeByDomain(rows/entrants, domains)`,
+  `dedupeByEmail(...)`, and an extended `findColumns`/`rowsToEntrants` that handle
+  the email column. Geometry + CSV parser stay.
+
+### Testing
+
+- TDD for the new pure logic in `lib.js` (domain exclusion incl. subdomains,
+  email de-dupe, email-column detection, email never surfaced in the mapped entrant).
+- ODS parsing + the full UI (upload → filter summary → spin → present-to-win →
+  purge → empty state) verified by running against `sample.ods`.
