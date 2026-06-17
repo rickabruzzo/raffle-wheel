@@ -26,7 +26,6 @@ function showMessage(text, isError) {
   el.classList.toggle('error', !!isError);
   el.hidden = false;
 }
-function clearMessage() { $('message').hidden = true; }
 
 // ---------- view state ----------
 function showSetup() {
