@@ -1,5 +1,6 @@
 import { CONFIG } from './config.js';
 import { rowsToEntrants, excludeByDomain, dedupeByEmail, targetRotation, sliceUnderPointer } from './lib.js';
+import { startStarfield } from './galaxy.js';
 
 // XLSX is the global from vendor/xlsx.full.min.js (loaded as a classic script first).
 
@@ -13,6 +14,7 @@ let entrants = [];        // current wheel (PII held only in memory, never persi
 let candidate = -1;       // index in entrants the wheel last landed on
 let rot = 0, spinning = false, spinToken = 0;
 let prizeImageUrl = null; // object URL, in memory only
+let starfield = null;     // galaxy backdrop (galaxy.js)
 
 // sound
 let audioCtx = null, muted = false;
@@ -104,7 +106,7 @@ async function loadFile(file) {
 function sizeWheel() {
   const area = $('wheelArea');
   const sq = $('wheelSquare');
-  const s = Math.max(140, Math.floor(Math.min(area.clientWidth, area.clientHeight)) - 8);
+  const s = Math.max(140, Math.floor(Math.min(area.clientWidth, area.clientHeight)) - 28);
   sq.style.width = s + 'px';
   sq.style.height = s + 'px';
 }
@@ -115,14 +117,15 @@ function drawWheel() {
   if (n === 0) {
     ctx.save(); ctx.translate(R, R);
     ctx.beginPath(); ctx.arc(0, 0, RADIUS, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(127,119,221,0.15)'; ctx.fill();
+    ctx.fillStyle = 'rgba(92,200,255,0.10)'; ctx.fill();
     ctx.restore();
     return;
   }
   const seg = (Math.PI * 2) / n;
   const showLabels = n <= CONFIG.MAX_LABELS;
   const colors = CONFIG.COLORS;
-  const fam = getComputedStyle(document.body).fontFamily || 'sans-serif';
+  const labelColors = CONFIG.LABEL_COLORS || [];
+  const fam = (getComputedStyle(document.body).getPropertyValue('--display') || '').trim() || 'sans-serif';
   ctx.save();
   ctx.translate(R, R);
   ctx.rotate(rot);
@@ -130,16 +133,30 @@ function drawWheel() {
     const a0 = -Math.PI / 2 + i * seg, a1 = a0 + seg;
     ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, RADIUS, a0, a1); ctx.closePath();
     ctx.fillStyle = colors[i % colors.length]; ctx.fill();
-    ctx.lineWidth = n > 60 ? 1 : 3; ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.stroke();
+    ctx.lineWidth = n > 60 ? 1 : 2; ctx.strokeStyle = 'rgba(6,8,18,0.85)'; ctx.stroke();
     if (showLabels) {
       ctx.save();
       ctx.rotate(a0 + seg / 2);
-      ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#ffffff';
-      ctx.font = `500 ${n > 24 ? 16 : 22}px ${fam}`;
+      ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = labelColors[i % colors.length] || '#ffffff';
+      ctx.font = `700 ${n > 24 ? 13 : 18}px ${fam}`;
       const label = entrants[i].first || entrants[i].last || '—';
-      ctx.fillText(label.length > 16 ? label.slice(0, 15) + '…' : label, RADIUS - 18, 0);
+      ctx.fillText(label.length > 16 ? label.slice(0, 15) + '…' : label, RADIUS - 30, 0);
       ctx.restore();
     }
+  }
+  // Inner ring glow + tick marks around the rim
+  ctx.beginPath(); ctx.arc(0, 0, RADIUS, 0, Math.PI * 2);
+  ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(255,209,102,0.85)'; ctx.stroke();
+  ctx.beginPath(); ctx.arc(0, 0, RADIUS - 7, 0, Math.PI * 2);
+  ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(92,200,255,0.55)'; ctx.stroke();
+  for (let i = 0; i < 72; i++) {
+    const a = (i / 72) * Math.PI * 2;
+    const long = i % 6 === 0;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(a) * (RADIUS - (long ? 18 : 12)), Math.sin(a) * (RADIUS - (long ? 18 : 12)));
+    ctx.lineTo(Math.cos(a) * (RADIUS - 8), Math.sin(a) * (RADIUS - 8));
+    ctx.lineWidth = long ? 2 : 1; ctx.strokeStyle = long ? 'rgba(255,209,102,0.9)' : 'rgba(238,241,255,0.45)'; ctx.stroke();
   }
   ctx.restore();
 }
@@ -151,7 +168,7 @@ function updateSpinButton() {
   $('spinBtn').disabled = entrants.length === 0 || spinning;
   $('spinBtn').textContent = entrants.length === 0
     ? 'No entrants left'
-    : (candidate >= 0 ? 'Spin again' : 'Spin the wheel');
+    : (candidate >= 0 ? 'Jump again' : 'Engage hyperdrive');
 }
 
 // ---------- sound ----------
@@ -165,25 +182,51 @@ function tick() {
   if (muted || !audioCtx) return;
   const t = audioCtx.currentTime;
   const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-  o.type = 'square'; o.frequency.value = 1100;
+  o.type = 'triangle'; o.frequency.value = 620;
   g.gain.setValueAtTime(0.0001, t);
   g.gain.exponentialRampToValueAtTime(0.06, t + 0.004);
   g.gain.exponentialRampToValueAtTime(0.0001, t + 0.045);
   o.connect(g).connect(audioCtx.destination);
   o.start(t); o.stop(t + 0.06);
 }
+// Low engine hum that swells during the spin (warp drive).
+let humNodes = null;
+function humStart() {
+  if (muted || !audioCtx || humNodes) return;
+  const t = audioCtx.currentTime;
+  const o1 = audioCtx.createOscillator(), o2 = audioCtx.createOscillator(), g = audioCtx.createGain();
+  const f = audioCtx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 420; f.Q.value = 2;
+  o1.type = 'sawtooth'; o1.frequency.value = 55;
+  o2.type = 'sawtooth'; o2.frequency.value = 55.7;
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.07, t + 1.2);
+  o1.connect(f); o2.connect(f); f.connect(g).connect(audioCtx.destination);
+  o1.start(t); o2.start(t);
+  humNodes = { o1, o2, g, f };
+}
+function humStop() {
+  if (!humNodes || !audioCtx) { humNodes = null; return; }
+  const t = audioCtx.currentTime, h = humNodes; humNodes = null;
+  h.g.gain.cancelScheduledValues(t);
+  h.g.gain.setValueAtTime(Math.max(0.0001, h.g.gain.value), t);
+  h.g.gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
+  h.o1.stop(t + 0.65); h.o2.stop(t + 0.65);
+}
 function winChime() {
   if (muted || !audioCtx) return;
   const base = audioCtx.currentTime;
-  [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => {
+  // Brassy fanfare: a fifth, then the octave, then the triad sustained.
+  const notes = [[392, 0], [587.33, 0.18], [392, 0.36], [587.33, 0.54], [783.99, 0.72], [987.77, 0.72], [1174.66, 0.72]];
+  notes.forEach(([f, dt], i) => {
     const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-    o.type = 'triangle'; o.frequency.value = f;
-    const t = base + i * 0.11;
+    const fl = audioCtx.createBiquadFilter(); fl.type = 'lowpass'; fl.frequency.value = 2400;
+    o.type = 'sawtooth'; o.frequency.value = f;
+    const t = base + dt, sus = i >= 4 ? 1.4 : 0.22;
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.16, t + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
-    o.connect(g).connect(audioCtx.destination);
-    o.start(t); o.stop(t + 0.55);
+    g.gain.exponentialRampToValueAtTime(i >= 4 ? 0.07 : 0.11, t + 0.03);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + sus);
+    o.connect(fl).connect(g).connect(audioCtx.destination);
+    o.start(t); o.stop(t + sus + 0.05);
   });
 }
 
@@ -202,13 +245,16 @@ function spin() {
   const w = Math.floor(Math.random() * n);
   const target = targetRotation(rot, w, n, 5);
   const start = rot, dur = 4500;
+  if (starfield) starfield.setWarp(true);
+  humStart();
   let t0 = null;
   lastSlice = sliceUnderPointer(rot, n);
   function frame(ts) {
-    if (myToken !== spinToken) return;   // a reload/purge superseded this spin
+    if (myToken !== spinToken) { if (starfield) starfield.setWarp(false); humStop(); return; }   // a reload/purge superseded this spin
     if (t0 === null) t0 = ts;
     const p = Math.min(1, (ts - t0) / dur);
     rot = start + (target - start) * easeOutCubic(p);
+    if (p > 0.72 && starfield) starfield.setWarp(false);   // drop out of warp as the wheel slows
     drawWheel();
     const s = sliceUnderPointer(rot, n);
     if (s !== lastSlice) {
@@ -220,6 +266,8 @@ function spin() {
     else {
       spinning = false;
       candidate = w;
+      humStop();
+      if (starfield) starfield.flash();
       updateSpinButton();
       showWinnerOverlay(entrants[w]);
       winChime();
@@ -278,17 +326,26 @@ function notHere() {
   spin();
 }
 
+function drawStar(c, r) {
+  c.beginPath();
+  for (let k = 0; k < 8; k++) {
+    const a = (k / 8) * Math.PI * 2 - Math.PI / 2;
+    const rr = k % 2 === 0 ? r : r * 0.42;
+    c.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
+  }
+  c.closePath(); c.fill();
+}
+
 function fireConfetti(cv, W, H, count) {
   cv.width = W; cv.height = H;
   const cx = cv.getContext('2d');
-  const colors = CONFIG.COLORS;
   const parts = [];
   for (let i = 0; i < count; i++) {
     parts.push({
       x: W / 2 + (Math.random() - 0.5) * W * 0.5, y: H * 0.28,
       vx: (Math.random() - 0.5) * 12, vy: Math.random() * -11 - 3,
       g: 0.30 + Math.random() * 0.22, size: 6 + Math.random() * 8,
-      color: colors[Math.floor(Math.random() * colors.length)],
+      color: ['#ffd166', '#5cc8ff', '#eef1ff', '#ff5a4e', '#ffe08a'][Math.floor(Math.random() * 5)],
       rot: Math.random() * Math.PI, vr: (Math.random() - 0.5) * 0.3,
     });
   }
@@ -298,7 +355,8 @@ function fireConfetti(cv, W, H, count) {
     for (const p of parts) {
       p.vy += p.g; p.x += p.vx; p.y += p.vy; p.rot += p.vr;
       cx.save(); cx.translate(p.x, p.y); cx.rotate(p.rot);
-      cx.fillStyle = p.color; cx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.6); cx.restore();
+      cx.fillStyle = p.color; cx.shadowColor = p.color; cx.shadowBlur = 8;
+      drawStar(cx, p.size / 2); cx.restore();
     }
     frames++;
     if (frames < 170) requestAnimationFrame(step); else cx.clearRect(0, 0, W, H);
@@ -308,6 +366,8 @@ function fireConfetti(cv, W, H, count) {
 
 // ---------- GDPR purge ----------
 function purgeEntrants() {
+  humStop();
+  if (starfield) starfield.setWarp(false);
   entrants = [];
   candidate = -1;
   rot = 0; spinToken++; spinning = false;
@@ -331,6 +391,7 @@ function raffleComplete() {
 // ---------- init ----------
 function toggleMute() {
   muted = !muted;
+  if (muted) humStop();
   $('muteBtn').textContent = muted ? 'Sound: off' : 'Sound: on';
   $('muteBtn').setAttribute('aria-pressed', String(muted));
 }
@@ -338,6 +399,10 @@ function toggleMute() {
 function init() {
   canvas = $('wheel');
   ctx = canvas.getContext('2d');
+  try { starfield = startStarfield($('stars')); } catch (e) { starfield = null; }
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(() => { if (!$('draw').hidden) drawWheel(); });
+  }
 
   $('confName').value = localStorage.getItem(LS_CONF) || '';
   $('prizeTitle').value = localStorage.getItem(LS_PRIZE) || '';

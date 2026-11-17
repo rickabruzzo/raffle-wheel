@@ -1,4 +1,17 @@
-# Raffle wheel
+# Raffle wheel — Galaxy edition
+
+A space-opera reskin of the raffle wheel: a live starfield that jumps to
+hyperspace while the wheel spins, gold and ion-blue palette, sci-fi display type
+(Orbitron / Exo 2 from Google Fonts), star-burst particles and a brassy fanfare
+on the win. Same mechanics and data handling as the original — this branch only
+touches `styles.css`, `index.html`, `config.js`, `app.js` and adds `galaxy.js`.
+The look is original; no film names, logos or quotes are used, so it is safe to
+run on a public booth screen.
+
+To deploy it as its own URL, point a second Vercel project at this repo and set
+its production branch to `galaxy-theme`.
+
+---
 
 A public web page that runs a "must be present to win" raffle: upload your
 entrants as an OpenDocument Spreadsheet (`.ods`), spin a wheel, and reveal a
@@ -29,8 +42,9 @@ it.
 ## Configure
 
 `config.js` holds the tunables: `EXCLUDE_DOMAINS` (default `["honeycomb.io"]`),
-`MAX_LABELS` (above this many entrants, slices render without text), and the
-slice `COLORS`.
+`MAX_LABELS` (above this many entrants, slices render without text), the slice
+`COLORS`, and `LABEL_COLORS` (per-slice text color so names stay readable on
+light slices).
 
 ## Run locally
 
